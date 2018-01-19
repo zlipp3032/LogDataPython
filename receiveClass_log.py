@@ -1,3 +1,5 @@
+# Not used in the current main example -- can implement by uncommenting necessary code throughout this branch
+
 import socket
 from rigidBodyState import *
 import collections
