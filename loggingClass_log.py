@@ -55,6 +55,7 @@ class Logging(threading.Thread):
         Data = msg.content['Data']
         outString+=str(datetime.now()) + ','
         outString+=str((datetime.now() - Data.startTime).total_seconds()) + ',' #relative time
+        #print Data
         outString+=mutil_log.vsToCSV(Data)
 #        for i in range(1,thisBodyState.parameters.expectedMAVs+1): #may need to add 1 to the for loop input argument when dealing with more agents
 #            try:
