@@ -11,4 +11,4 @@ defaultParams.kpy = 0.4
 defaultParams.kdy = 0.6
 defaultParams.kpz = 0.4
 defaultParams.kdz = 0.6
-defaultParams.targetAltitude = 3 # I am pretty sure this unit is in meters
+defaultParams.targetAltitude = 3 #  unit is in meters

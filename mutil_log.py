@@ -31,11 +31,17 @@ def vsToCSV(vs):
         out+=str(vs.position.x)+','
         out+=str(vs.position.y)+','
         out+=str(vs.position.z)+','
+        #out+=str(vs.leader.gx),','
+        #out+=str(vs.leader.gy),','
+        #out+=str(vs.leader.gz),','
         try:
                 out+=str(vs.command.ux)+','
                 out+=str(vs.command.uy)+','
                 out+=str(vs.command.uz)+','
-        except (KeyboardIntrrupt, SystemExit):
+                out+=str(vs.command.vel_est_x)+','
+                out+=str(vs.command.vel_est_y)+','
+                out+=str(vs.command.vel_est_z)+','
+        except (KeyboardInterrupt, SystemExit):
                 raise
 	#print (vs.position.keys['long])
 #	out+=str(vs.position)+','

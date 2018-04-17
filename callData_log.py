@@ -8,6 +8,7 @@ import threading
 import math as m
 import numpy as np
 from datetime import datetime, timedelta
+from pymavlink import mavutil
 
 logging.basicConfig(level=logging.WARNING)
 
@@ -26,8 +27,11 @@ class Control(threading.Thread):
         self.rigidBodyState.ID = 1 #localIP BESURE TO UPDATE THIS WHEN IT COMES TIME FOR MULTIAGENT TESTING!!!!!
         self.rigidBodyState.parameters = defaultParams
         self.vehicle = vehicle
-        # Arm and Takeoff SOLO
-        self.arm_and_takeoff()
+        # Arm and Takeoff SOLO and initiate leader as home location
+        #self.arm_and_takeoff()
+        self.vehicle.mode = VehicleMode("GUIDED")
+        self.vehicle.armed = True
+        self.rigidBodyState.leader = self.vehicle.location.global_frame
         
     def stop(self):
         self.stoprequest.set()
@@ -97,6 +101,7 @@ class Control(threading.Thread):
         self.vehicle.mode = VehicleMode('GUIDED')
         self.vehicle.armed = True
         self.vehicle.simple_takeoff(self.rigidBodyState.parameters.targetAltitude)
+        time.sleep(5) # Wait five seconds before sending takeoff command
         while True:
             print 'Altitude:" ', self.vehicle.location.global_relative_frame.alt
             #print self.vehicle.mode
@@ -104,10 +109,10 @@ class Control(threading.Thread):
             if self.vehicle.location.global_relative_frame.alt>=self.rigidBodyState.parameters.targetAltitude*0.95:
                 print "Reached Target Altitude"
                 break
-        time.sleep(10)
-        self.rigidBodyState.leader.gx = self.vehicle.location.global_frame.lat*m.pi/180
-        self.rigidBodyState.leader.gy = self.vehicle.location.global_frame.lon*m.pi/180
-        self.rigidBodyState.leader.gz = self.vehicle.location.global_relative_frame.alt
+        time.sleep(10) #Wait ten seconds before entering PD control algorithm
+        self.rigidBodyState.leader.lat = self.vehicle.location.global_frame.lat
+        self.rigidBodyState.leader.lon = self.vehicle.location.global_frame.lon
+        self.rigidBodyState.leader.alt = self.vehicle.location.global_frame.alt
 
         
     def getData(self):
@@ -138,16 +143,23 @@ class Control(threading.Thread):
         r = rEarth + self.rigidBodyState.position.z
         lat = self.vehicle.location.global_frame.lat*m.pi/180
         lon = self.vehicle.location.global_frame.lon*m.pi/180
+        leadlat = self.rigidBodyState.leader.lat*m.pi/180
+        leadlon = self.rigidBodyState.leader.lon*m.pi/180
         self.rigidBodyState.position.x = r*m.cos(lat)*m.cos(lon)
         self.rigidBodyState.position.y = r*m.cos(lat)*m.sin(lon)
-        leaderX = r*m.cos(self.rigidBodyState.leader.gx)*m.cos(self.rigidBodyState.leader.gy) + 4 
-        leaderY = r*m.cos(self.rigidBodyState.leader.gx)*m.sin(self.rigidBodyState.leader.gy)
-        leaderZ = self.rigidBodyState.leader.gz
+        leaderX = r*m.cos(leadlat)*m.cos(leadlon) + 4.000 
+        leaderY = r*m.cos(leadlat)*m.sin(leadlon)
+        leaderZ = self.rigidBodyState.leader.alt
+        self.rigidBodyState.leader.gx = leaderX
+        self.rigidBodyState.leader.gy = leaderY
+        self.rigidBodyState.leader.gz = leaderZ
+        print self.rigidBodyState.leader.gz
         self.rigidBodyState.command.ux = self.rigidBodyState.parameters.kpx*(leaderX-self.rigidBodyState.position.x) + self.rigidBodyState.parameters.kdx*(0 - self.rigidBodyState.velocity.vx)
         self.rigidBodyState.command.uy = self.rigidBodyState.parameters.kpy*(leaderY-self.rigidBodyState.position.y) + self.rigidBodyState.parameters.kdy*(0 - self.rigidBodyState.velocity.vy)
         self.rigidBodyState.command.uz = self.rigidBodyState.parameters.kpz*(leaderZ-self.rigidBodyState.position.z) + self.rigidBodyState.parameters.kdz*(0 - self.rigidBodyState.velocity.vz)
-        print self.rigidBodyState.leader
+        #print self.rigidBodyState.leader
         #print self.rigidBodyState.command
+        self.velocityEstimate()
         
 ##  def pushStatetoTxQueue(self):
 ##      msg = Message()
@@ -167,6 +179,46 @@ class Control(threading.Thread):
 #        msg.content['RigidBodies'] = self.RigidBodies
 ##        print msg.content
         self.logQueue.put(msg)
+
+
+    def velocityEstimate(self):
+        self.rigidBodyState.command.vel_est_x = self.rigidBodyState.previousState.velPrev_x + 0.5*self.rigidBodyState.previousState.accPrev_x*self.rigidBodyState.parameters.Ts + 0.5*self.rigidBodyState.command.ux*self.rigidBodyState.parameters.Ts
+        self.rigidBodyState.command.vel_est_y = self.rigidBodyState.previousState.velPrev_y + 0.5*self.rigidBodyState.previousState.accPrev_y*self.rigidBodyState.parameters.Ts + 0.5*self.rigidBodyState.command.uy*self.rigidBodyState.parameters.Ts
+        self.rigidBodyState.command.vel_est_z = self.rigidBodyState.previousState.velPrev_z + 0.5*self.rigidBodyState.previousState.accPrev_z*self.rigidBodyState.parameters.Ts + 0.5*self.rigidBodyState.command.uz*self.rigidBodyState.parameters.Ts
+        self.rigidBodyState.previousState.velPrev_x = self.rigidBodyState.command.vel_est_x
+        self.rigidBodyState.previousState.velPrev_y = self.rigidBodyState.command.vel_est_y
+        self.rigidBodyState.previousState.velPrev_z = self.rigidBodyState.command.vel_est_z
+        self.rigidBodyState.previousState.accPrev_x = self.rigidBodyState.command.ux
+        self.rigidBodyState.previousState.accPrev_y = self.rigidBodyState.command.uy
+        self.rigidBodyState.previousState.accPrev_z = self.rigidBodyState.command.uz
+        self.send_ned_velocity(self.rigidBodyState.command.vel_est_x,self.rigidBodyState.command.vel_est_y,self.rigidBodyState.command.vel_est_z,1)
+        
+    # Velocity commands with respect to home location directionally
+    # Be sure tp set up the home location and know your bearings; update the table below before you fly
+    # velocity_x > 0 => fly North
+    # velocity_x < 0 => fly South
+    # velocity_y > 0 => fly East
+    # velocity_y < 0 => fly West
+    # velocity_z < 0 => ascend
+    # velocity_z > 0 => descend
+    ###
+    def send_ned_velocity(self,velocity_x, velocity_y, velocity_z, duration):
+        #    """
+        #    Move vehicle in direction based on specified velocity vectors.
+        #    """
+        msg = self.vehicle.message_factory.set_position_target_local_ned_encode( #msg = vehicle.message_factory.set_position_target_global_int_encode(
+            0,       # time_boot_ms (not used)
+            0, 0,    # target system, target component
+            mavutil.mavlink.MAV_FRAME_LOCAL_NED, # frame
+            0b0000111111000111, # type_mask (only speeds enabled)
+            0, 0, 0, # x, y, z positions (not used)
+            velocity_x, velocity_y, velocity_z, # x, y, z velocity in m/s
+            0, 0, 0, # x, y, z acceleration (not supported yet, ignored in GCS_Mavlink)
+            0, 0)    # yaw, yaw_rate (not supported yet, ignored in GCS_Mavlink)
+        # send command to vehicle on 1 Hz cycle
+        for x in range(0,duration):
+            self.vehicle.send_mavlink(msg)
+            time.sleep(self.rigidBodyState.parameters.Ts)
 
 
 
