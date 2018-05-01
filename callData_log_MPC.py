@@ -28,10 +28,17 @@ class Control(threading.Thread):
         self.rigidBodyState.parameters = defaultParams
         self.vehicle = vehicle
         # Arm and Takeoff SOLO and initiate leader as home location
+        self.A_d = np.mat(np.block([[np.eye(3),self.rigidBodyState.parameters.Ts*np.eye(3)], [np.zeros((3,3)), np.eye(3)]]))
+        print self.A_d
+        self.lembda = 25
+        self.P = np.mat(np.block([[self.A_d], [self.A_d*self.A_d], [self.A_d*self.A_d*self.A_d],[self.A_d*self.A_d*self.A_d*self.A_d],[self.A_d*self.A_d*self.A_d*self.A_d*self.A_d]]))
+        self.I6 = np.mat(np.eye(6))
+        self.Q = np.mat(np.block([[self.I6], [self.A_d + self.I6], [self.A_d*self.A_d + self.A_d + self.I6],[self.A_d*self.A_d*self.A_d + self.A_d*self.A_d + self.A_d + self.I6],[self.A_d*self.A_d*self.A_d*self.A_d + self.A_d*self.A_d*self.A_d+ self.A_d*self.A_d + self.A_d + self.I6]]))
+        self.B_d = np.mat(np.block([[self.rigidBodyState.parameters.Ts*self.rigidBodyState.parameters.Ts*0.5*np.eye(3)], [self.rigidBodyState.parameters.Ts*np.eye(3)]]))
         #self.arm_and_takeoff()
         self.vehicle.mode = VehicleMode("ALT_HOLD")
         self.vehicle.armed = True
-        self.getLeaderData()
+        self.rigidBodyState.leader = self.vehicle.location.global_frame
         time.sleep(5)
         
     def stop(self):
@@ -160,14 +167,23 @@ class Control(threading.Thread):
         self.rigidBodyState.leader.gx = leaderX
         self.rigidBodyState.leader.gy = leaderY
         self.rigidBodyState.leader.gz = leaderZ
-        print self.rigidBodyState.leader
-        # PD Controller
-        self.rigidBodyState.command.ux = self.rigidBodyState.parameters.kpx*(leaderX-self.rigidBodyState.position.x) + self.rigidBodyState.parameters.kdx*(0 - self.rigidBodyState.velocity.vx)
-        self.rigidBodyState.command.uy = self.rigidBodyState.parameters.kpy*(leaderY-self.rigidBodyState.position.y) + self.rigidBodyState.parameters.kdy*(0 - self.rigidBodyState.velocity.vy)
-        self.rigidBodyState.command.uz = self.rigidBodyState.parameters.kpz*(leaderZ-self.rigidBodyState.position.z) + self.rigidBodyState.parameters.kdz*(0 - self.rigidBodyState.velocity.vz)
+        #print self.rigidBodyState.leader
+        # Model Predictive Controller
+        s_ref = np.mat(np.block([[self.rigidBodyState.leader.gx],[self.rigidBodyState.leader.gy],[self.rigidBodyState.leader.gz],[0],[0],[0],[self.rigidBodyState.leader.gx],[self.rigidBodyState.leader.gy],[self.rigidBodyState.leader.gz],[0],[0],[0],[self.rigidBodyState.leader.gx],[self.rigidBodyState.leader.gy],[self.rigidBodyState.leader.gz],[0],[0],[0],[self.rigidBodyState.leader.gx],[self.rigidBodyState.leader.gy],[self.rigidBodyState.leader.gz],[0],[0],[0],[self.rigidBodyState.leader.gx],[self.rigidBodyState.leader.gy],[self.rigidBodyState.leader.gz],[0],[0],[0]]))
+        cur_s = np.mat(np.block([[self.rigidBodyState.position.x],[self.rigidBodyState.position.y],[self.rigidBodyState.position.z],[self.rigidBodyState.velocity.vx],[self.rigidBodyState.velocity.vy],[self.rigidBodyState.velocity.vz]]))
+        W = np.mat(np.eye(30))
+        for i in range(30):
+            k = i%6
+            W[i,i] = m.exp(5*abs(s_ref[i,0] - cur_s[k,0]))
+            M = (self.B_d.T*self.Q.T*W*self.Q*self.B_d + np.mat(self.lembda*np.eye(3))).I*self.B_d.T*self.Q.T*W        
+            u = M*(s_ref - self.P*cur_s)
+        self.rigidBodyState.command.ux = u[0,0]
+        self.rigidBodyState.command.uy = u[1,0]
+        self.rigidBodyState.command.uz = u[2,0]
+        self.velocityEstimate()
         #print self.rigidBodyState.leader
         #print self.rigidBodyState.command
-        self.velocityEstimate()
+        
         
 ##  def pushStatetoTxQueue(self):
 ##      msg = Message()
@@ -177,6 +193,7 @@ class Control(threading.Thread):
 ##        self.transmitQueue.put(msg)
 ##      return msg
 
+        
     def pushStatetoLoggingQueue(self):
         msg = Message()
         msg.type = "UAV_LOG"

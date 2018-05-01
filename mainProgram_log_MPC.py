@@ -7,7 +7,7 @@ import os
 import Queue
 import threading
 #import receiveClass_log,loggingClass_log, callData_log
-import loggingClass_log, callData_log
+import loggingClass_log, callData_log_MPC
 from defaultParams_log import *
 from rigidBodyState_log import *
 import numpy as np
@@ -58,7 +58,7 @@ vehicle = connect(connection_string, wait_ready = True, baud=57600) #230400 or 1
 
 #receiveThread = receiveClass_log.Receiver(receiveQueue,localIP,Port,bufferLength)
 logThread = loggingClass_log.Logging(logQueue,logPath,expectedMAVs,startTime) 
-controlThread = callData_log.Control(logQueue,startTime,localIP,defaultParams,vehicle) # IF you end up receiving data, you will need to add 'receiveQueue' to the items input into this class
+controlThread = callData_log_MPC.Control(logQueue,startTime,localIP,defaultParams,vehicle) # IF you end up receiving data, you will need to add 'receiveQueue' to the items input into this class
 
 threads = []
 #threads.append(receiveThread)
