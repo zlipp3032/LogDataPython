@@ -9,7 +9,7 @@ Position = recordtype('Position',['x','y','z'], default=None)
 Velocity = recordtype('Velocity',['vx','vy','vz'], default = None)
 Leader = recordtype('Leader',['lat','lon','alt','gx','gy','gz','gvx','gvy','gvz'], default = None)
 
-Parameter = recordtype('Parameter',['Ts','peerTimeout','expectedMAVs','kpx','kdx','kpy','kdy','kpz','kdz','targetAltitude','quadMass','gravity','ku_vel','kv_vel','kw_vel','rollLimit','pitchLimit','throttleLimit','stoppingDistance','desiredSpeed'], default = None)
+Parameter = recordtype('Parameter',['Ts','peerTimeout','expectedMAVs','kpx','kdx','kpy','kdy','kpz','kdz','targetAltitude','quadMass','gravity','ku_vel','kv_vel','kw_vel','rollLimit','pitchLimit','throttleLimit','stoppingDistance','desiredSpeed','isTakeoff'], default = None)
 
 AttThrust = recordtype('AttThrust',['roll','pitch','throttle','yaw'], default = None)
 

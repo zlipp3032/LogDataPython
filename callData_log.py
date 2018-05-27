@@ -29,7 +29,8 @@ class Control(threading.Thread):
         self.vehicle = vehicle
         # Arm and Takeoff SOLO and initiate leader as home location
         #self.arm_and_takeoff()
-        self.customTakeoff()
+        #self.customTakeoff()
+        self.prepTakeoff()
         #self.vehicle.mode = VehicleMode("STABILIZE")
         #self.vehicle.armed = True
         #self.getLeaderData()
@@ -56,8 +57,19 @@ class Control(threading.Thread):
 ##########################################################
 ##########################################################
             self.getData()
-            if(not self.checkAbort()):
-                self.computePDControl()
+            if(self.rigidBodyState.parameters.isTakeoff):
+                if(not self.checkAbort()):
+                    self.computePDControl()
+            else:
+                if(not self.vehicle.location.global_relative_frame.alt>=self.rigidBodyState.parameters.targetAltitude*0.95):
+                    if(not self.checkAbort()):
+                        desDest = self.rigidBodyState.position.z - self.rigidBodyState.leader.alt
+                        self.computeTakeoffVelocity(desDest)                  
+                    #self.computeControl()
+                else:
+                    print "Reached Target Altitude"
+                    self.rigidBodyState.parameters.isTakeoff = True
+                    self.getLeaderData()
 ##            self.pushStatetoTxQueue()
             self.pushStatetoLoggingQueue()
             time.sleep(self.rigidBodyState.parameters.Ts)
@@ -65,7 +77,19 @@ class Control(threading.Thread):
         self.stop()
         print "Control Stopped"
 
-        
+
+    def prepTakeoff(self):
+        self.vehicle.mode = VehicleMode('STABILIZE')
+        print 'Basic Prearm Checks'
+        #insert Checks
+        print 'Arming Motors'
+        self.vehicle.channels.overrides = {'3':1000}
+        time.sleep(2)
+        #self.vehicle.armed = True
+        #self.getData()
+        self.getLeaderData()
+        time.sleep(2)
+        self.rigidBodyState.leader.alt = -self.rigidBodyState.parameters.targetAltitude
 
 ##########################################################
 ##########################################################
@@ -95,6 +119,20 @@ class Control(threading.Thread):
 ##########################################################
 ##########################################################
 
+
+    def computeTakeoffVelocity(self,desDest):    
+        if(abs(desDest) >= self.rigidBodyState.parameters.stoppingDistance):
+            self.rigidBodyState.leader.gvz = (self.rigidBodyState.parameters.desiredSpeed*desDest)/abs(desDest)
+            print self.rigidBodyState.leader
+            if(not self.checkAbort()):
+                self.computePDControl()
+                print "Taking Off"
+        else:
+            self.rigidBodyState.leader.gvz = (self.rigidBodyState.parameters.desiredSpeed*desDest)/self.rigidBodyState.parameters.stoppingDistance
+            if(not self.checkAbort()):
+                self.computePDControl()
+                print "Approaching Target Altitude"
+
     def customTakeoff(self):
         self.vehicle.mode = VehicleMode('STABILIZE')
         print 'Basic Prearm Checks'
@@ -117,24 +155,12 @@ class Control(threading.Thread):
                    #self.computeControl()
             else:
                 print "Reached Target Altitude"
+                self.rigidBodyState.parameters.isTakeoff = True
                 break
 ##            self.pushStatetoTxQueue()
             self.pushStatetoLoggingQueue()
             time.sleep(self.rigidBodyState.parameters.Ts)
         self.getLeaderData()
-        
-    def computeTakeoffVelocity(self,desDest):    
-        if(abs(desDest) >= self.rigidBodyState.parameters.stoppingDistance):
-            self.rigidBodyState.leader.gvz = (self.rigidBodyState.parameters.desiredSpeed*desDest)/abs(desDest)
-            print self.rigidBodyState.leader
-            if(not self.checkAbort()):
-                self.computePDControl()
-                print "Taking Off"
-        else:
-            self.rigidBodyState.leader.gvz = (self.rigidBodyState.parameters.desiredSpeed*desDest)/self.rigidBodyState.parameters.stoppingDistance
-            if(not self.checkAbort()):
-                self.computePDControl()
-                print "Approaching Target Altitude"
         
         
     def arm_and_takeoff(self):
