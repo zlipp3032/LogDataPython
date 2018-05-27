@@ -29,9 +29,10 @@ class Control(threading.Thread):
         self.vehicle = vehicle
         # Arm and Takeoff SOLO and initiate leader as home location
         #self.arm_and_takeoff()
-        self.vehicle.mode = VehicleMode("STABILIZE")
+        self.customTakeoff()
+        #self.vehicle.mode = VehicleMode("STABILIZE")
         #self.vehicle.armed = True
-        self.getLeaderData()
+        #self.getLeaderData()
         #time.sleep(5)
         
     def stop(self):
@@ -56,7 +57,7 @@ class Control(threading.Thread):
 ##########################################################
             self.getData()
             if(not self.checkAbort()):
-                self.computeControl()
+                self.computePDControl()
 ##            self.pushStatetoTxQueue()
             self.pushStatetoLoggingQueue()
             time.sleep(self.rigidBodyState.parameters.Ts)
@@ -94,7 +95,48 @@ class Control(threading.Thread):
 ##########################################################
 ##########################################################
 
-
+    def customTakeoff(self):
+        self.vehicle.mode = VehicleMode('STABILIZE')
+        print 'Basic Prearm Checks'
+        #insert Checks
+        print 'Arming Motors'
+        self.vehicle.channels.overrides = {'3':1000}
+        time.sleep(2)
+        self.vehicle.armed = True
+        #self.getData()
+        self.getLeaderData()
+        time.sleep(5)
+        self.rigidBodyState.leader.alt = -self.rigidBodyState.parameters.targetAltitude
+        #print self.rigidBodyState.leader
+        while True:
+            self.getData()
+            if(not self.vehicle.location.global_relative_frame.alt>=self.rigidBodyState.parameters.targetAltitude*0.95):
+               if(not self.checkAbort()):
+                   desDest = self.rigidBodyState.position.z - self.rigidBodyState.leader.alt
+                   self.computeTakeoffVelocity(desDest)                  
+                   #self.computeControl()
+            else:
+                print "Reached Target Altitude"
+                break
+##            self.pushStatetoTxQueue()
+            self.pushStatetoLoggingQueue()
+            time.sleep(self.rigidBodyState.parameters.Ts)
+        self.getLeaderData()
+        
+    def computeTakeoffVelocity(self,desDest):    
+        if(abs(desDest) >= self.rigidBodyState.parameters.stoppingDistance):
+            self.rigidBodyState.leader.gvz = (self.rigidBodyState.parameters.desiredSpeed*desDest)/abs(desDest)
+            print self.rigidBodyState.leader
+            if(not self.checkAbort()):
+                self.computePDControl()
+                print "Taking Off"
+        else:
+            self.rigidBodyState.leader.gvz = (self.rigidBodyState.parameters.desiredSpeed*desDest)/self.rigidBodyState.parameters.stoppingDistance
+            if(not self.checkAbort()):
+                self.computePDControl()
+                print "Approaching Target Altitude"
+        
+        
     def arm_and_takeoff(self):
         print 'Basic Prearm Checks'
         while not self.vehicle.is_armable:
@@ -122,6 +164,11 @@ class Control(threading.Thread):
         self.rigidBodyState.leader.lat = self.vehicle.location.global_frame.lat
         self.rigidBodyState.leader.lon = self.vehicle.location.global_frame.lon
         self.rigidBodyState.leader.alt = -self.vehicle.location.global_relative_frame.alt
+        self.rigidBodyState.leader.gvx = 0
+        self.rigidBodyState.leader.gvy = 0
+        self.rigidBodyState.leader.gvz = 0
+        print self.rigidBodyState.leader
+
         
     def checkAbort(self):
         # Check for proper flght mode
@@ -152,37 +199,18 @@ class Control(threading.Thread):
         lat = self.vehicle.location.global_frame.lat#*m.pi/180
         lon = self.vehicle.location.global_frame.lon#*m.pi/180
         qi_gps = np.matrix([lat, lon])
-        ql_gps = np.matrix([self.rigidBodyState.leader.lat, self.rigidBodyState.leader.lon])
+        qkl_gps = np.matrix([self.rigidBodyState.leader.lat, self.rigidBodyState.leader.lon])
         dq = self.getRelPos(qi_gps,qkl_gps)
         self.rigidBodyState.position.y = dq[0,0]
         self.rigidBodyState.position.x = dq[0,1]
         #self.rigidBodyState.position.x = -r*m.cos(lat)*m.cos(lon)
         #self.rigidBodyState.position.y = r*m.cos(lat)*m.sin(lon)
         
-    def computeControl(self):
-        # Convert the x,y positions to meters...
-        #rEarth = 6378137 #m
-        #rLead = rEarth + self.rigidBodyState.leader.alt
-        #lat = self.vehicle.location.global_frame.lat*m.pi/180
-        #lon = self.vehicle.location.global_frame.lon*m.pi/180
-        #leadlat = self.rigidBodyState.leader.lat*m.pi/180
-        #leadlon = self.rigidBodyState.leader.lon*m.pi/180
-        #self.rigidBodyState.position.x = -r*m.cos(lat)*m.cos(lon)
-        #self.rigidBodyState.position.y = r*m.cos(lat)*m.sin(lon)
-        #leaderX = -rLead*m.cos(leadlat)*m.cos(leadlon)# + 2.00 
-        #leaderY = rLead*m.cos(leadlat)*m.sin(leadlon)
-        #leaderZ = self.rigidBodyState.leader.alt
-        #self.rigidBodyState.leader.gx = leaderX
-        #self.rigidBodyState.leader.gy = leaderY
-        #self.rigidBodyState.leader.gz = leaderZ
-        #print self.rigidBodyState.leader
-        # PD Controller
-        #self.rigidBodyState.command.ux = self.rigidBodyState.parameters.kpx*(leaderX-self.rigidBodyState.position.x) + self.rigidBodyState.parameters.kdx*(0 - self.rigidBodyState.velocity.vx)-0.5
-        #self.rigidBodyState.command.uy = self.rigidBodyState.parameters.kpy*(leaderY-self.rigidBodyState.position.y) + self.rigidBodyState.parameters.kdy*(0 - self.rigidBodyState.velocity.vy)-4
-        self.rigidBodyState.command.uz = self.rigidBodyState.parameters.kpz*(self.rigidBodyState.leader.alt-self.rigidBodyState.position.z) + self.rigidBodyState.parameters.kdz*(0 - self.rigidBodyState.velocity.vz)
+    def computePDControl(self):
+        self.rigidBodyState.command.uz = self.rigidBodyState.parameters.kpz*(self.rigidBodyState.leader.alt-self.rigidBodyState.position.z) + self.rigidBodyState.parameters.kdz*(self.rigidBodyState.leader.gvz - self.rigidBodyState.velocity.vz)
         # Everything Above this might be wrong....
-        self.rigidBodyState.command.ux = self.rigidBodyState.parameters.kpx*self.rigidBodyState.position.x + self.rigidBodyState.parameters.kdx*(0 - self.rigidBodyState.velocity.vx)
-        self.rigidBodyState.command.uy = self.rigidBodyState.parameters.kpy*self.rigidBodyState.position.y + self.rigidBodyState.parameters.kdy*(0 - self.rigidBodyState.velocity.vy)
+        self.rigidBodyState.command.ux = self.rigidBodyState.parameters.kpx*self.rigidBodyState.position.x + self.rigidBodyState.parameters.kdx*(self.rigidBodyState.leader.gvx - self.rigidBodyState.velocity.vx)
+        self.rigidBodyState.command.uy = self.rigidBodyState.parameters.kpy*self.rigidBodyState.position.y + self.rigidBodyState.parameters.kdy*(self.rigidBodyState.leader.gvy - self.rigidBodyState.velocity.vy)
         #print self.rigidBodyState.leader
         #print self.rigidBodyState.command
         self.velocityEstimate()
@@ -249,7 +277,7 @@ class Control(threading.Thread):
         #Scale the compute control values to match the format used in vehicle.channel.overrides{}
         ROLL =  1500 + (500/self.rigidBodyState.parameters.rollLimit)*self.rigidBodyState.test.roll
         PITCH = 1500 + (500/self.rigidBodyState.parameters.pitchLimit)*self.rigidBodyState.test.pitch
-        THROTTLE = 1000 + 32.254*self.rigidBodyState.test.throttle - 0.257*self.rigidBodyState.test.throttle*self.rigidBodyState.test.throttle#1000 + 25.746*self.rigidBodyState.test.throttle - 0.1406*self.rigidBodyState.test.throttle*self.rigidBodyState.test.throttle
+        THROTTLE = 972 + 48.484*self.rigidBodyState.test.throttle + 1.3241*self.rigidBodyState.test.throttle*self.rigidBodyState.test.throttle#1000 + 32.254*self.rigidBodyState.test.throttle - 0.257*self.rigidBodyState.test.throttle*self.rigidBodyState.test.throttle#
         YAW = self.rigidBodyState.attitude.yaw
         # Saturate to keep commands in range of input values
         self.rigidBodyState.command.Roll = self.saturate(ROLL,1000,2000)
